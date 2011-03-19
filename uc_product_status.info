@@ -1,0 +1,5 @@
+name = Product Status
+description = description here
+dependencies[] = uc_order
+package = Ubercart - extra
+core = 6.x

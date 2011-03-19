@@ -1,0 +1,182 @@
+<?php
+/*
+ * Implementation hook_menu()
+ */
+function uc_product_status_menu() {
+  $items = array();
+  $items['admin/store/products/status'] = array(
+    'title' => 'Product status',
+    'access arguments' => array('administer products'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('uc_product_status_settings_form'),
+    'weight' => -6,
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  return $items;
+}
+
+
+/*
+ * Implementation hook_form_alter()
+ */
+function uc_product_status_form_alter(&$form, &$form_state, $form_id) {
+  switch($form_id) {
+    case 'uc_order_edit_products_form':
+      $non_product = tapir_get_table('op_products_edit_table');
+      $form['products']['#columns']['product_status'] = array(
+        'cell' => t('Status'),
+        'weight' => 8,
+      );
+      $product_count = count(array_diff_key($form['products'], $non_product));
+      $options = uc_product_status_get_status_list();
+      for($i = 0; $i < $product_count; $i++) {
+        $status = uc_product_status_get_status_by_order_product_id($form['products'][$i]['order_product_id']['#value']);
+        $form['products'][$i]['product_status'] = array(
+          '#type' => 'select',
+          '#name' => "products[$i][product_status]",
+          '#parents' => array(),
+          '#options' => $options,
+          '#default_value' => $status->status_value,
+        );
+      }
+      $form['#submit'][] = 'uc_product_status_submit';
+      break;
+    
+    case 'uc_order_edit_form':
+      $form['#submit'][] = 'uc_product_status_submit';
+      break;
+  }
+}
+
+function uc_product_status_submit($form, &$form_state) {
+  $products = $form_state['clicked_button']['#post']['products'];
+  if (!empty($products)) {
+    foreach($products as $product) {
+      $order_product_id = $product['order_product_id'];
+      $status = uc_product_status_get_status_by_order_product_id($order_product_id);
+      if ($status->status_value != $product['product_status']) {
+        $sid = $status->sid;
+        uc_product_status_save_data($product, $sid);
+        $uid = $form_state['values']['order_uid'];
+        uc_product_status_notify($uid, $product);
+      }
+    }
+  }
+}
+
+function uc_product_status_settings_form() {
+  $form = array();
+  $form['product_status_list'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Product status list'),
+    '#description' => t(''), //todo add desc
+    '#default_value' => variable_get('product_status_list', ''),
+  );
+
+  $form['product_status_email_subject'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Email notification subject'),
+    '#description' => t(''), //todo add desc
+    '#default_value' => variable_get('product_status_email_subject', ''),
+  );
+
+  $form['product_status_email_body'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Email notification body'),
+    '#description' => t(''), //todo add desc
+    '#default_value' => variable_get('product_status_email_body', ''),
+  );
+
+  return system_settings_form($form);
+}
+
+function uc_product_status_get_status_list() {
+  $status = variable_get('product_status_list', '');
+  $status = explode("\n", $status);
+  foreach ($status as $value) {
+    $value = explode('|', $value);
+    $list[$value[0]] = $value[1];
+  }
+  return $list;
+}
+
+function uc_product_status_save_data($product, $sid = null) {
+  $table = 'uc_product_status';
+  $data = new stdClass();
+  $data->sid = $sid;
+  $data->	order_product_id = $product['order_product_id'];
+  $data->status_value = $product['product_status'];
+  $key = NULL;
+  if ($sid) {
+    $key = 'sid';
+  }
+  drupal_write_record($table, $data, $key);
+}
+
+function uc_product_status_get_status_by_order_product_id($order_product_id) {
+  $query = "SELECT sid, status_value FROM {uc_product_status} WHERE order_product_id = %d";
+  $result = db_query($query, $order_product_id);
+  $status = new stdClass();
+  while ($row = db_fetch_object($result)) {
+    $status->sid = $row->sid;
+    $status->status_value = $row->status_value;
+  }
+  return $status;
+}
+
+function uc_product_status_notify($uid, $product) {
+  $account = user_load($uid);
+  $params['type'] = 'uc_product_status';
+  $params['token']['customer'] = $uid;
+  $params['token']['new_status'] = $product['product_status'];
+  $params['token']['product_name'] = $product['title'];
+  drupal_mail('uc_product_status', 'notice', $account->mail, user_preferred_language($account), $params);
+}
+
+function uc_product_status_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'notice':
+      switch ($params['type']) {
+        case 'uc_product_status':
+          $subject = variable_get('product_status_email_subject', '');
+          $body = variable_get('product_status_email_body', '');
+          $tokens = $params['token'];
+          $message['subject'] = token_replace($subject, 'uc_product_status', $tokens);
+          $message['body'] = token_replace($body, 'uc_product_status', $tokens);
+          break;
+      }
+      break;
+  }
+}
+
+/*
+ * Implementation hook_token_list()
+ */
+function uc_product_status_token_list($type = 'all') {
+  $tokens = array();
+  if ($type == 'uc_product_status' || $type == 'all') {
+    $tokens['uc_product_status']['uc_product_status_customer'] = t('Customer');
+    $tokens['uc_product_status']['uc_product_status_product'] = t('Product name');
+    $tokens['uc_product_status']['uc_product_status_new-status'] = t('New product status');
+  }
+  return $tokens;
+}
+
+/*
+ * Implementation hook_token_value()
+ */
+function uc_product_status_token_values($type, $object = null) {
+  $values = array();
+  switch ($type) {
+    case 'uc_product_status':
+    case 'all':
+      $customer = user_load($object['customer']);
+      $status = uc_product_status_get_status_list();
+      $values['uc_product_status_customer'] = $customer->name;
+      $values['uc_product_status_product'] = $object['product_name'];
+      $values['uc_product_status_new-status'] = $status[$object['new_status']];
+      break;
+  }
+  return $values;
+}

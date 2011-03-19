@@ -1,0 +1,40 @@
+<?php
+/*
+ * Implementation hook_install()
+ */
+function uc_product_status_install() {
+  drupal_install_schema('uc_product_status');
+}
+
+/*
+ * Implementation hook_uninstall()
+ */
+function uc_product_status_uninstall() {
+  drupal_uninstall_schema('uc_product_status');
+}
+
+function uc_product_status_schema() {
+  $schema = array();
+    $schema['uc_product_status'] = array(
+    'fields' => array(
+      'sid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'order_product_id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'status_value' => array(
+        'description' => t('Result data'),
+        'type' => 'varchar',
+        'not null' => TRUE,
+        'length' => 255,
+      ),
+    ),
+    'primary key' => array('sid'),
+  );
+  return $schema;
+}
